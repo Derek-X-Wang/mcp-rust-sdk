@@ -61,7 +61,7 @@ impl<S> WebSocketTransport<S> {
     fn convert_to_ws_message(message: &Message) -> Result<WsMessage, Error> {
         let json = serde_json::to_string(message)
             .map_err(|e| Error::Serialization(e.to_string()))?;
-        Ok(WsMessage::Text(json))
+        Ok(WsMessage::Text(json.into()))
     }
 
     /// Parses a WebSocket message into an MCP message.
@@ -190,7 +190,7 @@ impl WebSocketTransport<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>
     pub async fn new(url: &str) -> Result<Self, Error> {
         let url = Url::parse(url).map_err(|e| Error::Transport(e.to_string()))?;
         
-        let (ws_stream, _) = connect_async(url)
+        let (ws_stream, _) = connect_async(url.to_string())
             .await
             .map_err(|e| Error::Transport(e.to_string()))?;
 
