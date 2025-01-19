@@ -1,5 +1,5 @@
 //! Standard I/O Transport Implementation
-//! 
+//!
 //! This module provides a transport implementation that uses standard input/output (stdio)
 //! for communication. This is particularly useful for:
 //! - Command-line tools that need to communicate with an MCP server
@@ -11,17 +11,14 @@
 
 use async_trait::async_trait;
 use futures::Stream;
-use futures::StreamExt;
 use std::{
-    io::{Read, Write},
+    io::Write,
     pin::Pin,
     sync::{Arc, Mutex},
-    time::Duration,
 };
 use tokio::{
     io::{AsyncBufReadExt, BufReader as TokioBufReader},
     sync::broadcast,
-    time::timeout,
 };
 
 use crate::{
@@ -49,7 +46,7 @@ use crate::{
 ///
 /// ```rust
 /// use mcp_rust_sdk::transport::stdio::StdioTransport;
-/// 
+///
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ///     let transport = StdioTransport::new();
@@ -87,7 +84,7 @@ impl StdioTransport {
                             Ok(message) => Ok(message),
                             Err(err) => Err(Error::Serialization(err.to_string())),
                         };
-                        
+
                         if sender_clone.send(message).is_err() {
                             break;
                         }
@@ -109,7 +106,7 @@ impl Transport for StdioTransport {
     /// Sends a message by writing it to stdout.
     ///
     /// # Arguments
-///
+    ///
     /// * `message` - The message to send
     ///
     /// # Returns
@@ -178,19 +175,19 @@ mod tests {
     use std::sync::mpsc;
     use std::thread;
     use std::time::Duration;
-    use tokio::sync::broadcast;
     use tokio::runtime::Runtime;
+    use tokio::sync::broadcast;
 
-    #[test] 
+    #[test]
     fn test_stdio_transport() {
         // Create a oneshot channel to verify message sending
         let (verify_tx, verify_rx) = mpsc::channel();
-        
+
         // Spawn a thread to handle the transport operations
         thread::spawn(move || {
             // Create a tokio runtime for async operations
             let rt = Runtime::new().unwrap();
-            
+
             // Create test message
             let request = Request::new(
                 "test_method",
