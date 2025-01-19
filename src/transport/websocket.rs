@@ -30,8 +30,6 @@ use crate::{
     transport::{Message, Transport},
 };
 
-const SUBPROTOCOL: &str = "mcp";
-
 /// Type alias for the WebSocket connection stream
 type WebSocketConnection<S> = WebSocketStream<S>;
 

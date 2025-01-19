@@ -1,6 +1,6 @@
-use std::sync::Arc;
 use futures::StreamExt;
-use tokio::sync::{RwLock, Mutex};
+use std::sync::Arc;
+use tokio::sync::{Mutex, RwLock};
 
 use crate::{
     error::{Error, ErrorCode},
@@ -15,6 +15,7 @@ pub struct Client {
     server_capabilities: Arc<RwLock<Option<ServerCapabilities>>>,
     request_counter: Arc<RwLock<i64>>,
     response_receiver: Arc<Mutex<tokio::sync::mpsc::UnboundedReceiver<Message>>>,
+    #[allow(dead_code)]
     response_sender: tokio::sync::mpsc::UnboundedSender<Message>,
 }
 
@@ -62,9 +63,7 @@ impl Client {
             "protocolVersion": crate::LATEST_PROTOCOL_VERSION,
         });
 
-        let response = self
-            .request("initialize", Some(params))
-            .await?;
+        let response = self.request("initialize", Some(params)).await?;
 
         let server_capabilities: ServerCapabilities = serde_json::from_value(response)?;
         *self.server_capabilities.write().await = Some(server_capabilities.clone());
@@ -76,7 +75,7 @@ impl Client {
     }
 
     /// Send a request to the server and wait for the response.
-    /// 
+    ///
     /// This method will block until a response is received from the server.
     /// If the server returns an error, it will be propagated as an `Error`.
     pub async fn request(
@@ -112,10 +111,9 @@ impl Client {
                             &error.message,
                         ));
                     }
-                    return response.result.ok_or_else(|| Error::protocol(
-                        ErrorCode::InternalError,
-                        "Response missing result",
-                    ));
+                    return response.result.ok_or_else(|| {
+                        Error::protocol(ErrorCode::InternalError, "Response missing result")
+                    });
                 }
             }
         }
@@ -133,7 +131,9 @@ impl Client {
         params: Option<serde_json::Value>,
     ) -> Result<(), Error> {
         let notification = Notification::new(method, params);
-        self.transport.send(Message::Notification(notification)).await
+        self.transport
+            .send(Message::Notification(notification))
+            .await
     }
 
     /// Get the server capabilities
@@ -157,10 +157,10 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+    use futures::Stream;
     use std::{pin::Pin, time::Duration};
     use tokio::sync::broadcast;
-    use futures::Stream;
-    use async_trait::async_trait;
 
     struct MockTransport {
         tx: broadcast::Sender<Result<Message, Error>>,
@@ -171,10 +171,7 @@ mod tests {
         fn new(send_delay: Duration) -> (Self, broadcast::Sender<Result<Message, Error>>) {
             let (tx, _) = broadcast::channel(10);
             let tx_clone = tx.clone();
-            (Self {
-                tx,
-                send_delay,
-            }, tx_clone)
+            (Self { tx, send_delay }, tx_clone)
         }
     }
 
