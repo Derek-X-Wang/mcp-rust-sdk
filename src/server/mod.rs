@@ -146,6 +146,7 @@ impl Server {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::{Notification, RequestId};
     use async_trait::async_trait;
     use futures::{Stream, StreamExt};
     use std::{pin::Pin, time::Duration};
