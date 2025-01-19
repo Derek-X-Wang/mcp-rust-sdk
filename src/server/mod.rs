@@ -5,7 +5,7 @@ use tokio::sync::RwLock;
 
 use crate::{
     error::{Error, ErrorCode},
-    protocol::{Request, Response, Notification, ResponseError, RequestId},
+    protocol::{Request, Response, ResponseError},
     transport::{Message, Transport},
     types::{ClientCapabilities, Implementation, ServerCapabilities},
 };
@@ -98,13 +98,21 @@ impl Server {
                 }
 
                 let params: serde_json::Value = request.params.unwrap_or(serde_json::json!({}));
-                let implementation: Implementation =
-                    serde_json::from_value(params.get("implementation").cloned().unwrap_or_default())?;
-                let capabilities: ClientCapabilities =
-                    serde_json::from_value(params.get("capabilities").cloned().unwrap_or_default())?;
+                let implementation: Implementation = serde_json::from_value(
+                    params.get("implementation").cloned().unwrap_or_default(),
+                )?;
+                let capabilities: ClientCapabilities = serde_json::from_value(
+                    params.get("capabilities").cloned().unwrap_or_default(),
+                )?;
 
-                let result = self.handler.initialize(implementation, capabilities).await?;
-                Ok(Response::success(request.id, Some(serde_json::to_value(result)?)))
+                let result = self
+                    .handler
+                    .initialize(implementation, capabilities)
+                    .await?;
+                Ok(Response::success(
+                    request.id,
+                    Some(serde_json::to_value(result)?),
+                ))
             }
             "shutdown" => {
                 if !initialized {
@@ -125,7 +133,10 @@ impl Server {
                     ));
                 }
 
-                let result = self.handler.handle_method(&request.method, request.params).await?;
+                let result = self
+                    .handler
+                    .handle_method(&request.method, request.params)
+                    .await?;
                 Ok(Response::success(request.id, Some(result)))
             }
         }
@@ -135,10 +146,10 @@ impl Server {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+    use futures::{Stream, StreamExt};
     use std::{pin::Pin, time::Duration};
     use tokio::sync::{broadcast, mpsc};
-    use futures::{Stream, StreamExt};
-    use async_trait::async_trait;
 
     struct TestHandler {
         init_delay: Duration,
@@ -188,25 +199,31 @@ mod tests {
     }
 
     impl MockTransport {
-        fn new() -> (Self, mpsc::UnboundedSender<Result<Message, Error>>, broadcast::Receiver<Result<Message, Error>>) {
+        fn new() -> (
+            Self,
+            mpsc::UnboundedSender<Result<Message, Error>>,
+            broadcast::Receiver<Result<Message, Error>>,
+        ) {
             let (tx1, rx1) = mpsc::unbounded_channel();
             let (tx2, rx2) = broadcast::channel(100);
-            (Self {
-                client_to_server: Arc::new(tokio::sync::Mutex::new(rx1)),
-                server_to_client: tx2.clone(),
-            }, tx1, rx2)
+            (
+                Self {
+                    client_to_server: Arc::new(tokio::sync::Mutex::new(rx1)),
+                    server_to_client: tx2.clone(),
+                },
+                tx1,
+                rx2,
+            )
         }
     }
 
     #[async_trait]
     impl Transport for MockTransport {
         async fn send(&self, message: Message) -> Result<(), Error> {
-            self.server_to_client.send(Ok(message)).map(|_| ()).map_err(|_| {
-                Error::protocol(
-                    ErrorCode::InternalError,
-                    "Failed to send message",
-                )
-            })
+            self.server_to_client
+                .send(Ok(message))
+                .map(|_| ())
+                .map_err(|_| Error::protocol(ErrorCode::InternalError, "Failed to send message"))
         }
 
         fn receive(&self) -> Pin<Box<dyn Stream<Item = Result<Message, Error>> + Send>> {
@@ -262,11 +279,7 @@ mod tests {
         let _ = client_tx.send(Ok(Message::Request(init_request)));
 
         // Try to receive response with 5 second timeout
-        let result = tokio::time::timeout(
-            Duration::from_secs(5),
-            client_rx.recv(),
-        )
-        .await;
+        let result = tokio::time::timeout(Duration::from_secs(5), client_rx.recv()).await;
 
         // Should timeout
         assert!(result.is_err(), "Expected timeout error");
@@ -314,23 +327,25 @@ mod tests {
         let _ = client_tx.send(Ok(Message::Request(init_request)));
 
         // Try to receive response with 5 second timeout
-        let result = tokio::time::timeout(
-            Duration::from_secs(5),
-            client_rx.recv(),
-        )
-        .await;
+        let result = tokio::time::timeout(Duration::from_secs(5), client_rx.recv()).await;
 
         // Should succeed
         assert!(result.is_ok(), "Operation should complete before timeout");
         if let Ok(Ok(Ok(Message::Response(response)))) = result {
-            assert!(response.error.is_none(), "Response should not contain error");
+            assert!(
+                response.error.is_none(),
+                "Response should not contain error"
+            );
             assert!(response.result.is_some(), "Response should contain result");
         } else {
             panic!("Expected successful response");
         }
 
         // Send initialized notification
-        let _ = client_tx.send(Ok(Message::Notification(Notification::new("initialized", None))));
+        let _ = client_tx.send(Ok(Message::Notification(Notification::new(
+            "initialized",
+            None,
+        ))));
 
         // Give server time to process notification
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -345,16 +360,15 @@ mod tests {
         let _ = client_tx.send(Ok(Message::Request(method_request)));
 
         // Try to receive response with 5 second timeout
-        let result = tokio::time::timeout(
-            Duration::from_secs(5),
-            client_rx.recv(),
-        )
-        .await;
+        let result = tokio::time::timeout(Duration::from_secs(5), client_rx.recv()).await;
 
         // Should succeed
         assert!(result.is_ok(), "Operation should complete before timeout");
         if let Ok(Ok(Ok(Message::Response(response)))) = result {
-            assert!(response.error.is_none(), "Response should not contain error");
+            assert!(
+                response.error.is_none(),
+                "Response should not contain error"
+            );
             assert_eq!(
                 response.result,
                 Some(serde_json::json!({"status": "ok"})),
@@ -400,11 +414,7 @@ mod tests {
         let _ = client_tx.send(Ok(Message::Request(method_request)));
 
         // Should receive error response
-        let result = tokio::time::timeout(
-            Duration::from_secs(5),
-            client_rx.recv(),
-        )
-        .await;
+        let result = tokio::time::timeout(Duration::from_secs(5), client_rx.recv()).await;
 
         assert!(result.is_ok(), "Should receive error response");
         if let Ok(Ok(Ok(Message::Response(response)))) = result {
@@ -464,7 +474,10 @@ mod tests {
         let _ = client_rx.recv().await;
 
         // Send initialized notification
-        let _ = client_tx.send(Ok(Message::Notification(Notification::new("initialized", None))));
+        let _ = client_tx.send(Ok(Message::Notification(Notification::new(
+            "initialized",
+            None,
+        ))));
 
         // Give server time to process notification
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -486,11 +499,7 @@ mod tests {
         let _ = client_tx.send(Ok(Message::Request(init_request2)));
 
         // Try to receive response
-        let result = tokio::time::timeout(
-            Duration::from_secs(5),
-            client_rx.recv(),
-        )
-        .await;
+        let result = tokio::time::timeout(Duration::from_secs(5), client_rx.recv()).await;
 
         // Should receive error response
         assert!(result.is_ok(), "Should receive response");
@@ -551,32 +560,33 @@ mod tests {
         let _ = client_rx.recv().await;
 
         // Send initialized notification
-        let _ = client_tx.send(Ok(Message::Notification(Notification::new("initialized", None))));
+        let _ = client_tx.send(Ok(Message::Notification(Notification::new(
+            "initialized",
+            None,
+        ))));
 
         // Give server time to process notification
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         // Send shutdown request
-        let shutdown_request = Request::new(
-            "shutdown",
-            None,
-            RequestId::Number(2),
-        );
+        let shutdown_request = Request::new("shutdown", None, RequestId::Number(2));
 
         let _ = client_tx.send(Ok(Message::Request(shutdown_request)));
 
         // Try to receive response
-        let result = tokio::time::timeout(
-            Duration::from_secs(5),
-            client_rx.recv(),
-        )
-        .await;
+        let result = tokio::time::timeout(Duration::from_secs(5), client_rx.recv()).await;
 
         // Should receive success response
         assert!(result.is_ok(), "Should receive response");
         if let Ok(Ok(Ok(Message::Response(response)))) = result {
-            assert!(response.error.is_none(), "Response should not contain error");
-            assert!(response.result.is_none(), "Response should not contain result");
+            assert!(
+                response.error.is_none(),
+                "Response should not contain error"
+            );
+            assert!(
+                response.result.is_none(),
+                "Response should not contain result"
+            );
         } else {
             panic!("Expected success response");
         }
