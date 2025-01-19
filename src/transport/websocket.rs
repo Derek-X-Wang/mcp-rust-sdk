@@ -1,5 +1,5 @@
 //! WebSocket Transport Implementation
-//! 
+//!
 //! This module provides a transport implementation that uses WebSocket protocol
 //! for communication. This transport is ideal for:
 //! - Network-based client-server communication
@@ -11,19 +11,18 @@
 //! provides thread-safe connection management through Arc and Mutex.
 
 use async_trait::async_trait;
-use futures::{Stream, StreamExt, SinkExt, Sink};
-use std::{pin::Pin, sync::Arc, fmt::Display};
+use futures::{
+    stream::{SplitSink, SplitStream},
+    Sink, SinkExt, Stream, StreamExt,
+};
+use std::{fmt::Display, pin::Pin, sync::Arc};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
 use tokio_tungstenite::{
     connect_async,
-    tungstenite::{
-        protocol::Message as WsMessage,
-        protocol::CloseFrame,
-        error::Error as WsError,
-    },
+    tungstenite::{error::Error as WsError, protocol::CloseFrame, protocol::Message as WsMessage},
     WebSocketStream,
 };
-use tokio::io::{AsyncRead, AsyncWrite};
 use url::Url;
 
 use crate::{
@@ -41,26 +40,33 @@ type WebSocketConnection<S> = WebSocketStream<S>;
 /// This transport provides bidirectional communication over WebSocket protocol,
 /// supporting both secure (WSS) and standard (WS) connections.
 pub struct WebSocketTransport<S> {
-    connection: Arc<Mutex<WebSocketConnection<S>>>,
+    read_connection: Arc<Mutex<SplitStream<WebSocketConnection<S>>>>,
+    write_connection: Arc<Mutex<SplitSink<WebSocketConnection<S>, WsMessage>>>,
 }
 
-impl<S> WebSocketTransport<S> {
+impl<S> WebSocketTransport<S>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
+{
     /// Creates a new WebSocket transport from an existing WebSocket stream.
     /// This is typically used on the server side when accepting a new connection.
     ///
     /// # Arguments
     ///
     /// * `stream` - The WebSocket stream from an accepted connection
+
     pub fn from_stream(stream: WebSocketConnection<S>) -> Self {
+        let (w, r) = stream.split();
         Self {
-            connection: Arc::new(Mutex::new(stream)),
+            read_connection: Arc::new(Mutex::new(r)),
+            write_connection: Arc::new(Mutex::new(w)),
         }
     }
 
     /// Converts an MCP message to a WebSocket message.
     fn convert_to_ws_message(message: &Message) -> Result<WsMessage, Error> {
-        let json = serde_json::to_string(message)
-            .map_err(|e| Error::Serialization(e.to_string()))?;
+        let json =
+            serde_json::to_string(message).map_err(|e| Error::Serialization(e.to_string()))?;
         Ok(WsMessage::Text(json))
     }
 
@@ -70,7 +76,9 @@ impl<S> WebSocketTransport<S> {
             WsMessage::Text(text) => {
                 serde_json::from_str(&text).map_err(|e| Error::Serialization(e.to_string()))
             }
-            WsMessage::Binary(_) => Err(Error::Transport("Binary messages not supported".to_string())),
+            WsMessage::Binary(_) => Err(Error::Transport(
+                "Binary messages not supported".to_string(),
+            )),
             WsMessage::Ping(_) => Ok(Message::Notification(crate::protocol::Notification {
                 jsonrpc: crate::protocol::JSONRPC_VERSION.to_string(),
                 method: "ping".to_string(),
@@ -87,7 +95,10 @@ impl<S> WebSocketTransport<S> {
     }
 
     /// Handle a WebSocket message, including control messages
-    async fn handle_ws_message<T, E>(connection: &mut T, message: WsMessage) -> Result<Option<Message>, Error> 
+    async fn handle_ws_message<T, E>(
+        connection: &mut T,
+        message: WsMessage,
+    ) -> Result<Option<Message>, Error>
     where
         T: Sink<WsMessage, Error = E> + Unpin,
         E: Display,
@@ -95,7 +106,9 @@ impl<S> WebSocketTransport<S> {
         match message {
             WsMessage::Ping(data) => {
                 // Automatically respond to ping with pong
-                connection.send(WsMessage::Pong(data)).await
+                connection
+                    .send(WsMessage::Pong(data))
+                    .await
                     .map_err(|e| Error::Transport(e.to_string()))?;
                 Ok(None)
             }
@@ -109,13 +122,13 @@ impl<S> WebSocketTransport<S> {
 }
 
 #[async_trait]
-impl<S> Transport for WebSocketTransport<S> 
+impl<S> Transport for WebSocketTransport<S>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
 {
     async fn send(&self, message: Message) -> Result<(), Error> {
         let ws_message = Self::convert_to_ws_message(&message)?;
-        let mut connection = self.connection.lock().await;
+        let mut connection = self.write_connection.lock().await;
         connection
             .send(ws_message)
             .await
@@ -123,30 +136,45 @@ where
     }
 
     fn receive(&self) -> Pin<Box<dyn Stream<Item = Result<Message, Error>> + Send>> {
-        let connection = self.connection.clone();
-        Box::pin(futures::stream::unfold(connection, move |connection| {
-            let connection = connection.clone();
-            async move {
-                let mut guard = connection.lock().await;
-                loop {
-                    match guard.next().await {
-                        Some(Ok(ws_message)) => {
-                            match Self::handle_ws_message(&mut *guard, ws_message).await {
-                                Ok(Some(message)) => return Some((Ok(message), connection.clone())),
-                                Ok(None) => continue, // Control message handled, continue to next message
-                                Err(e) => return Some((Err(e), connection.clone())),
+        let read_connection = self.read_connection.clone();
+        let write_connection = self.write_connection.clone();
+
+        Box::pin(futures::stream::unfold(
+            read_connection,
+            move |read_connection| {
+                let read_connection = read_connection.clone();
+                let write_connection = write_connection.clone();
+                async move {
+                    loop {
+                        let mut guard = read_connection.lock().await;
+                        match guard.next().await {
+                            Some(Ok(ws_message)) => {
+                                drop(guard);
+                                let mut guard = write_connection.lock().await;
+                                match Self::handle_ws_message(&mut *guard, ws_message).await {
+                                    Ok(Some(message)) => {
+                                        return Some((Ok(message), read_connection.clone()))
+                                    }
+                                    Ok(None) => continue, // Control message handled, continue to next message
+                                    Err(e) => return Some((Err(e), read_connection.clone())),
+                                }
                             }
+                            Some(Err(e)) => {
+                                return Some((
+                                    Err(Error::Transport(e.to_string())),
+                                    read_connection.clone(),
+                                ))
+                            }
+                            None => return None,
                         }
-                        Some(Err(e)) => return Some((Err(Error::Transport(e.to_string())), connection.clone())),
-                        None => return None,
                     }
                 }
-            }
-        }))
+            },
+        ))
     }
 
     async fn close(&self) -> Result<(), Error> {
-        let mut connection = self.connection.lock().await;
+        let mut connection = self.write_connection.lock().await;
         // Send close frame with normal closure status
         connection
             .send(WsMessage::Close(Some(CloseFrame {
@@ -155,7 +183,9 @@ where
             })))
             .await
             .map_err(|e| Error::Transport(e.to_string()))?;
-        
+        drop(connection);
+
+        let mut connection = self.read_connection.lock().await;
         // Wait for the close frame from the server
         while let Some(msg) = connection.next().await {
             match msg {
@@ -169,7 +199,7 @@ where
                 }
             }
         }
-        
+
         Ok(())
     }
 }
@@ -189,13 +219,14 @@ impl WebSocketTransport<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>
     /// - Err: An error if connection fails
     pub async fn new(url: &str) -> Result<Self, Error> {
         let url = Url::parse(url).map_err(|e| Error::Transport(e.to_string()))?;
-        
+
         let (ws_stream, _) = connect_async(url)
             .await
             .map_err(|e| Error::Transport(e.to_string()))?;
-
+        let (w, r) = ws_stream.split();
         Ok(Self {
-            connection: Arc::new(Mutex::new(ws_stream)),
+            read_connection: Arc::new(Mutex::new(r)),
+            write_connection: Arc::new(Mutex::new(w)),
         })
     }
 }
@@ -203,7 +234,7 @@ impl WebSocketTransport<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{JSONRPC_VERSION, Notification};
+    use crate::protocol::{Notification, JSONRPC_VERSION};
 
     #[tokio::test]
     async fn test_message_conversion() {
@@ -216,11 +247,17 @@ mod tests {
         });
 
         // Convert to WebSocket message
-        let ws_message = WebSocketTransport::<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>::convert_to_ws_message(&message).unwrap();
+        let ws_message = WebSocketTransport::<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >::convert_to_ws_message(&message)
+        .unwrap();
         assert!(matches!(ws_message, WsMessage::Text(_)));
 
         // Parse back to MCP message
-        let parsed_message = WebSocketTransport::<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>::parse_ws_message(ws_message).unwrap();
+        let parsed_message = WebSocketTransport::<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >::parse_ws_message(ws_message)
+        .unwrap();
         assert!(matches!(parsed_message, Message::Notification(_)));
 
         if let Message::Notification(notification) = parsed_message {
