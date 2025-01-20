@@ -19,7 +19,7 @@ pub struct RequestMeta {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationMeta {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub custom: Option<HashMap<String, serde_json::Value>>,
+    pub custom: Option<HashMap<String, Value>>,
 }
 
 /// Progress information
@@ -37,12 +37,14 @@ pub struct Progress {
 
 /// Resource contents
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum ResourceContents {
-    #[serde(rename = "text")]
-    Text { text: String },
-    #[serde(rename = "blob")]
-    Blob { data: Vec<u8> },
+pub struct ResourceContents {
+    uri: String,
+    #[serde(rename = "mimeType")]
+    mime_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    blob: Option<String>,
 }
 
 /// A resource in the system
@@ -50,13 +52,18 @@ pub enum ResourceContents {
 pub struct Resource {
     /// Unique identifier for the resource
     pub uri: String,
-    /// Human-readable title
-    pub title: String,
+    /// Human-readable name
+    pub name: String,
     /// Optional description
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// Resource contents
-    pub contents: ResourceContents,
+    /// The MIME type of this resource, if known
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "mimeType")]
+    pub mime_type: Option<String>,
+    /// The size of the raw resource content, in bytes (i.e., before base64 encoding or any tokenization), if known
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<String>,
 }
 
 /// Model preferences for completion requests
@@ -149,9 +156,9 @@ pub struct PromptArgument {
 /// A prompt definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Prompt {
-    pub id: String,
     pub name: String,
-    pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub arguments: Option<Vec<PromptArgument>>,
 }
@@ -164,18 +171,19 @@ pub enum MessageContent {
     Text { text: String },
     #[serde(rename = "image")]
     Image {
-        uri: String,
-        alt_text: Option<String>,
+        data: String,
+        #[serde(rename = "mimeType")]
+        mime_type: Option<String>,
     },
-    #[serde(rename = "resource")]
-    Resource { resource: Resource },
+    // #[serde(rename = "resource")]
+    // Resource { resource: Resource },
 }
 
 /// A prompt message
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptMessage {
     pub role: String,
-    pub content: Vec<MessageContent>,
+    pub content: MessageContent,
 }
 
 /// A tool definition
