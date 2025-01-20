@@ -97,13 +97,13 @@ pub struct Implementation {
 pub struct ClientCapabilities {
     /// Experimental, non-standard capabilities that the client supports
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub experimental: Option<HashMap<String, Value>>,
+    pub experimental: Option<Value>,
     /// Present if the client supports listing roots
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub roots: Option<HashMap<String, Value>>,
+    pub roots: Option<Value>,
     /// Present if the client supports sampling from an LLM
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sampling: Option<HashMap<String, Value>>,
+    pub sampling: Option<Value>,
 }
 
 /// Server capabilities
