@@ -62,16 +62,31 @@ impl Client {
             "capabilities": capabilities,
             "protocolVersion": crate::LATEST_PROTOCOL_VERSION,
         });
-
         let response = self.request("initialize", Some(params)).await?;
-
-        let server_capabilities: ServerCapabilities = serde_json::from_value(response)?;
-        *self.server_capabilities.write().await = Some(server_capabilities.clone());
-
+        let mut caps = ServerCapabilities::default();
+        if let Some(resp_obj) = response.as_object() {
+            if let Some(server_caps) = resp_obj.get("capabilities") {
+                if let Some(exp) = server_caps.get("experimental") {
+                    caps.experimental = Some(exp.clone());
+                }
+                if let Some(logging) = server_caps.get("logging") {
+                    caps.logging = Some(logging.clone());
+                }
+                if let Some(prompts) = server_caps.get("prompts") {
+                    caps.prompts = Some(prompts.clone());
+                }
+                if let Some(resources) = server_caps.get("resources") {
+                    caps.resources = Some(resources.clone());
+                }
+                if let Some(tools) = server_caps.get("tools") {
+                    caps.tools = Some(tools.clone());
+                }
+            }
+        }
+        *self.server_capabilities.write().await = Some(caps.clone());
         // Send initialized notification
         self.notify("initialized", None).await?;
-
-        Ok(server_capabilities)
+        Ok(caps)
     }
 
     /// Send a request to the server and wait for the response.

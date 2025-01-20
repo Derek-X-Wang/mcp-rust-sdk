@@ -111,18 +111,19 @@ pub struct ClientCapabilities {
 pub struct ServerCapabilities {
     /// Experimental, non-standard capabilities that the client supports
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub experimental: Option<HashMap<String, Value>>,
+    pub experimental: Option<Value>,
     /// Present if the server supports sending log messages to the client
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub logging: Option<HashMap<String, Value>>,
+    pub logging: Option<Value>,
     /// Present if the server offers any prompt templates
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub prompts: Option<HashMap<String, Value>>,
+    pub prompts: Option<Value>,
     /// Present if the server offers any resources to read
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub resources: Option<HashMap<String, Value>>,
+    pub resources: Option<Value>,
     /// Present if the server offers any tools to call
-    pub tools: Option<HashMap<String, Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Value>,
 }
 
 /// Logging levels
