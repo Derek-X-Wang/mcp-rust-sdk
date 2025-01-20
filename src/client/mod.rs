@@ -58,7 +58,7 @@ impl Client {
         capabilities: ClientCapabilities,
     ) -> Result<ServerCapabilities, Error> {
         let params = serde_json::json!({
-            "implementation": implementation,
+            "clientInfo": implementation,
             "capabilities": capabilities,
             "protocolVersion": crate::LATEST_PROTOCOL_VERSION,
         });

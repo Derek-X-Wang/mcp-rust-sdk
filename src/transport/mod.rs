@@ -8,7 +8,7 @@ use crate::Error;
 
 /// A message that can be sent over a transport
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[serde(untagged)]
 pub enum Message {
     #[serde(rename = "request")]
     Request(Request),

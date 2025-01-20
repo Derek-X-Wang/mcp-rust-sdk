@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 
 /// A progress token, used to associate progress notifications with the original request
@@ -94,17 +95,34 @@ pub struct Implementation {
 /// Client capabilities
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ClientCapabilities {
-    /// Optional custom capabilities
+    /// Experimental, non-standard capabilities that the client supports
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub custom: Option<HashMap<String, serde_json::Value>>,
+    pub experimental: Option<HashMap<String, Value>>,
+    /// Present if the client supports listing roots
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub roots: Option<HashMap<String, Value>>,
+    /// Present if the client supports sampling from an LLM
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sampling: Option<HashMap<String, Value>>,
 }
 
 /// Server capabilities
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ServerCapabilities {
-    /// Optional custom capabilities
+    /// Experimental, non-standard capabilities that the client supports
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub custom: Option<HashMap<String, serde_json::Value>>,
+    pub experimental: Option<HashMap<String, Value>>,
+    /// Present if the server supports sending log messages to the client
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logging: Option<HashMap<String, Value>>,
+    /// Present if the server offers any prompt templates
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompts: Option<HashMap<String, Value>>,
+    /// Present if the server offers any resources to read
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resources: Option<HashMap<String, Value>>,
+    /// Present if the server offers any tools to call
+    pub tools: Option<HashMap<String, Value>>,
 }
 
 /// Logging levels
@@ -144,7 +162,10 @@ pub enum MessageContent {
     #[serde(rename = "text")]
     Text { text: String },
     #[serde(rename = "image")]
-    Image { uri: String, alt_text: Option<String> },
+    Image {
+        uri: String,
+        alt_text: Option<String>,
+    },
     #[serde(rename = "resource")]
     Resource { resource: Resource },
 }
@@ -161,7 +182,8 @@ pub struct PromptMessage {
 pub struct Tool {
     pub name: String,
     pub description: String,
-    pub schema: serde_json::Value,
+    #[serde(rename = "inputSchema")]
+    pub schema: Value,
 }
 
 /// Root definition
