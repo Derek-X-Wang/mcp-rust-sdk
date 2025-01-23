@@ -137,11 +137,14 @@ pub struct ServerCapabilities {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LoggingLevel {
-    Error,
-    Warn,
-    Info,
     Debug,
-    Trace,
+    Info,
+    Notice,
+    Warning,
+    Error,
+    Critical,
+    Alert,
+    Emergency,
 }
 
 /// A prompt argument
@@ -175,8 +178,6 @@ pub enum MessageContent {
         #[serde(rename = "mimeType")]
         mime_type: Option<String>,
     },
-    // #[serde(rename = "resource")]
-    // Resource { resource: Resource },
 }
 
 /// A prompt message
@@ -203,7 +204,7 @@ pub struct Root {
     pub description: String,
 }
 
-/// Initialize request
+/// /initialize request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InitializeRequest {
     pub client_info: Implementation,
@@ -212,14 +213,14 @@ pub struct InitializeRequest {
     pub protocol_version: Option<String>,
 }
 
-/// Initialize result
+/// /initialize response
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InitializeResult {
     pub server_info: Implementation,
     pub capabilities: ServerCapabilities,
 }
 
-/// List resources request
+/// /resources/list request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListResourcesRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -228,7 +229,7 @@ pub struct ListResourcesRequest {
     pub cursor: Option<Cursor>,
 }
 
-/// List resources result
+/// /resources/list response
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListResourcesResult {
     pub resources: Vec<Resource>,
@@ -236,17 +237,46 @@ pub struct ListResourcesResult {
     pub next_cursor: Option<Cursor>,
 }
 
-/// List prompts request
+/// /prompts/list request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListPromptsRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<Cursor>,
 }
 
-/// List prompts result
+/// /prompts/list response
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListPromptsResult {
     pub prompts: Vec<Prompt>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<Cursor>,
+}
+
+/// /prompts/get request
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetPromptRequest {
+    pub name: String,
+    pub arguments: Option<Value>,
+}
+
+/// /prompts/get response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetPromptResult {
+    pub description: Option<String>,
+    pub messages: Vec<PromptMessage>,
+}
+
+/// /tools/list request
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListToolsRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<Cursor>,
+}
+
+/// /tools/list response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListToolsResult {
+    pub tools: Vec<Tool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<Cursor>,
 }

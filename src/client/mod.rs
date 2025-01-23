@@ -1,39 +1,58 @@
-use futures::StreamExt;
-use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
-
 use crate::{
     error::{Error, ErrorCode},
     protocol::{Notification, Request, RequestId},
     transport::{Message, Transport},
     types::{ClientCapabilities, Implementation, ServerCapabilities},
 };
+use async_trait::async_trait;
+use futures::StreamExt;
+use serde_json::{json, Value};
+use std::sync::Arc;
+use tokio::sync::{
+    mpsc::{UnboundedReceiver, UnboundedSender},
+    Mutex, RwLock,
+};
 
-/// MCP client state
-pub struct Client {
-    transport: Arc<dyn Transport>,
-    server_capabilities: Arc<RwLock<Option<ServerCapabilities>>>,
-    request_counter: Arc<RwLock<i64>>,
-    response_receiver: Arc<Mutex<tokio::sync::mpsc::UnboundedReceiver<Message>>>,
-    #[allow(dead_code)]
-    response_sender: tokio::sync::mpsc::UnboundedSender<Message>,
+/// Trait for implementing MCP client handlers
+#[async_trait]
+pub trait ClientHandler: Send + Sync {
+    /// Start the handler and listen for messages
+    async fn start(&self) -> Result<(), Error>;
+
+    /// Handle shutdown request
+    async fn shutdown(&self) -> Result<(), Error>;
+
+    /// Handle custom method calls
+    async fn handle_method(
+        &self,
+        method: &str,
+        params: Option<serde_json::Value>,
+    ) -> Result<serde_json::Value, Error>;
 }
-
-impl Client {
-    /// Create a new MCP client with the given transport
-    pub fn new(transport: Arc<dyn Transport>) -> Self {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let client = Self {
-            transport: transport.clone(),
-            server_capabilities: Arc::new(RwLock::new(None)),
-            request_counter: Arc::new(RwLock::new(0)),
-            response_receiver: Arc::new(Mutex::new(rx)),
-            response_sender: tx.clone(),
-        };
-
+pub struct DefaultClientHandler {
+    transport: Arc<dyn Transport>,
+    receiver: Arc<Mutex<UnboundedReceiver<Message>>>,
+    sender: Arc<UnboundedSender<Message>>,
+}
+impl DefaultClientHandler {
+    pub fn new(
+        transport: Arc<dyn Transport>,
+        sender: UnboundedSender<Message>,
+        receiver: UnboundedReceiver<Message>,
+    ) -> Self {
+        Self {
+            transport,
+            sender: Arc::new(sender),
+            receiver: Arc::new(Mutex::new(receiver)),
+        }
+    }
+}
+#[async_trait]
+impl ClientHandler for DefaultClientHandler {
+    async fn start(&self) -> Result<(), Error> {
         // Start response handler task
-        let transport_clone = transport.clone();
-        let tx_clone = tx.clone();
+        let transport_clone = self.transport.clone();
+        let tx_clone = self.sender.clone();
         tokio::spawn(async move {
             let mut stream = transport_clone.receive();
             while let Some(result) = stream.next().await {
@@ -48,7 +67,49 @@ impl Client {
             }
         });
 
-        client
+        let rx_clone = self.receiver.clone();
+        let tx_clone = self.transport.clone();
+        tokio::spawn(async move {
+            let mut stream = rx_clone.lock().await;
+            while let Some(message) = stream.recv().await {
+                tx_clone.send(message).await.unwrap();
+            }
+        });
+        Ok(())
+    }
+
+    async fn handle_method(&self, method: &str, _params: Option<Value>) -> Result<Value, Error> {
+        match method {
+            "sampling/createMessage" => Ok(json!({})),
+            _ => Err(Error::Other("unknown method".to_string())),
+        }
+    }
+
+    async fn shutdown(&self) -> Result<(), Error> {
+        println!("Client shutting down");
+        Ok(())
+    }
+}
+
+/// MCP client state
+#[derive(Clone)]
+pub struct Client {
+    server_capabilities: Arc<RwLock<Option<ServerCapabilities>>>,
+    request_counter: Arc<RwLock<i64>>,
+    #[allow(dead_code)]
+    sender: Arc<UnboundedSender<Message>>,
+    receiver: Arc<Mutex<UnboundedReceiver<Message>>>,
+}
+
+impl Client {
+    /// Create a new MCP client
+    pub fn new(sender: UnboundedSender<Message>, receiver: UnboundedReceiver<Message>) -> Self {
+        Self {
+            server_capabilities: Arc::new(RwLock::new(None)),
+            request_counter: Arc::new(RwLock::new(0)),
+            sender: Arc::new(sender),
+            receiver: Arc::new(Mutex::new(receiver)),
+        }
     }
 
     /// Initialize the client
@@ -103,10 +164,11 @@ impl Client {
         let id = RequestId::Number(*counter);
 
         let request = Request::new(method, params, id.clone());
-        self.transport.send(Message::Request(request)).await?;
-
+        self.sender
+            .send(Message::Request(request))
+            .map_err(|_| Error::Transport("failed to send request message".to_string()))?;
         // Wait for matching response
-        let mut receiver = self.response_receiver.lock().await;
+        let mut receiver = self.receiver.lock().await;
         while let Some(message) = receiver.recv().await {
             if let Message::Response(response) = message {
                 if response.id == id {
@@ -146,9 +208,9 @@ impl Client {
         params: Option<serde_json::Value>,
     ) -> Result<(), Error> {
         let notification = Notification::new(method, params);
-        self.transport
+        self.sender
             .send(Message::Notification(notification))
-            .await
+            .map_err(|_| Error::Transport("failed to send notification message".to_string()))
     }
 
     /// Get the server capabilities
@@ -160,12 +222,9 @@ impl Client {
     pub async fn shutdown(&self) -> Result<(), Error> {
         // Send shutdown request
         self.request("shutdown", None).await?;
-
         // Send exit notification
         self.notify("exit", None).await?;
-
-        // Close transport
-        self.transport.close().await
+        Ok(())
     }
 }
 
