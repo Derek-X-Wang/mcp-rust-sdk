@@ -138,10 +138,7 @@ impl ClientHandler for DefaultClientHandler {
                 }
                 Ok(())
             }
-            "notifications/resources/list_changed" => {
-                println!("Got list changed notification!");
-                Ok(())
-            }
+            "notifications/resources/list_changed" => Ok(()),
             _ => Err(Error::Other("unknown notification".to_string())),
         }
     }
