@@ -1,13 +1,13 @@
 use crate::{
     error::{Error, ErrorCode},
-    protocol::{Notification, Request, RequestId},
+    protocol::{Notification, Request, RequestId, Response},
     transport::{Message, Transport},
     types::{ClientCapabilities, Implementation, ServerCapabilities},
 };
 use async_trait::async_trait;
 use futures::StreamExt;
 use serde_json::{json, Value};
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
     Mutex, RwLock,
@@ -17,7 +17,7 @@ use tokio::sync::{
 #[async_trait]
 pub trait ClientHandler: Send + Sync {
     /// Start the handler and listen for messages
-    async fn start(&self) -> Result<(), Error>;
+    async fn start(self) -> Result<(), Error>;
 
     /// Handle shutdown request
     async fn shutdown(&self) -> Result<(), Error>;
@@ -25,10 +25,19 @@ pub trait ClientHandler: Send + Sync {
     /// Handle custom method calls
     async fn handle_method(
         &self,
-        method: &str,
+        method: String,
         params: Option<serde_json::Value>,
     ) -> Result<serde_json::Value, Error>;
+
+    /// Handle notifications
+    async fn handle_notification(
+        &self,
+        method: String,
+        params: Option<serde_json::Value>,
+    ) -> Result<(), Error>;
 }
+
+#[derive(Clone)]
 pub struct DefaultClientHandler {
     transport: Arc<dyn Transport>,
     receiver: Arc<Mutex<UnboundedReceiver<Message>>>,
@@ -49,24 +58,48 @@ impl DefaultClientHandler {
 }
 #[async_trait]
 impl ClientHandler for DefaultClientHandler {
-    async fn start(&self) -> Result<(), Error> {
-        // Start response handler task
-        let transport_clone = self.transport.clone();
-        let tx_clone = self.sender.clone();
+    async fn start(self) -> Result<(), Error> {
+        let cl = self.clone();
+        // listen for messages from the server
         tokio::spawn(async move {
-            let mut stream = transport_clone.receive();
+            let mut stream = cl.transport.receive();
             while let Some(result) = stream.next().await {
                 match result {
-                    Ok(message) => {
-                        if tx_clone.send(message).is_err() {
-                            break;
+                    Ok(message) => match &message {
+                        Message::Request(r) => {
+                            let res = cl.handle_method(r.method.clone(), r.params.clone()).await;
+                            if cl
+                                .transport
+                                .send(Message::Response(Response::success(
+                                    r.id.clone(),
+                                    Some(res.unwrap()),
+                                )))
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
                         }
-                    }
+                        Message::Response(_) => {
+                            if cl.sender.send(message).is_err() {
+                                break;
+                            }
+                        }
+                        Message::Notification(n) => {
+                            if cl
+                                .handle_notification(n.method.clone(), n.params.clone())
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                    },
                     Err(_) => break,
                 }
             }
         });
-
+        // listen for requests from the client
         let rx_clone = self.receiver.clone();
         let tx_clone = self.transport.clone();
         tokio::spawn(async move {
@@ -78,10 +111,38 @@ impl ClientHandler for DefaultClientHandler {
         Ok(())
     }
 
-    async fn handle_method(&self, method: &str, _params: Option<Value>) -> Result<Value, Error> {
-        match method {
-            "sampling/createMessage" => Ok(json!({})),
+    async fn handle_method(&self, method: String, _params: Option<Value>) -> Result<Value, Error> {
+        match method.as_str() {
+            // TODO: allow a commune client to impl this
+            "sampling/createMessage" => {
+                println!("Got sampling/createMessage");
+                Ok(json!({}))
+            }
             _ => Err(Error::Other("unknown method".to_string())),
+        }
+    }
+
+    async fn handle_notification(
+        &self,
+        method: String,
+        params: Option<Value>,
+    ) -> Result<(), Error> {
+        match method.as_str() {
+            "notifications/resources/updated" => {
+                if let Some(p) = params {
+                    let update_params: HashMap<String, Value> = serde_json::from_value(p)?;
+                    if let Some(uri_val) = update_params.get("uri") {
+                        let uri = uri_val.as_str().ok_or("some file").unwrap();
+                        println!("Resource {uri} was updated");
+                    }
+                }
+                Ok(())
+            }
+            "notifications/resources/list_changed" => {
+                println!("Got list changed notification!");
+                Ok(())
+            }
+            _ => Err(Error::Other("unknown notification".to_string())),
         }
     }
 
@@ -199,6 +260,18 @@ impl Client {
             ErrorCode::InternalError,
             "Connection closed while waiting for response",
         ))
+    }
+
+    pub async fn subscribe(&self, uri: &str) -> Result<(), Error> {
+        let mut counter = self.request_counter.write().await;
+        *counter += 1;
+        let id = RequestId::Number(*counter);
+
+        let request = Request::new("resources/subscribe", Some(json!({"uri": uri})), id.clone());
+        self.sender.send(Message::Request(request)).map_err(|_| {
+            Error::Transport("failed to send subscribe request message".to_string())
+        })?;
+        Ok(())
     }
 
     /// Send a notification to the server
