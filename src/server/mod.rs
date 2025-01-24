@@ -256,7 +256,7 @@ mod tests {
         // Start server in background
         let server_handle = tokio::spawn(async move {
             if let Err(e) = server.start().await {
-                eprintln!("Server error: {}", e);
+                log::error!("Server error: {}", e);
             }
         });
 
@@ -304,7 +304,7 @@ mod tests {
         // Start server in background
         let server_handle = tokio::spawn(async move {
             if let Err(e) = server.start().await {
-                eprintln!("Server error: {}", e);
+                log::error!("Server error: {}", e);
             }
         });
 
@@ -398,7 +398,7 @@ mod tests {
         // Start server in background
         let server_handle = tokio::spawn(async move {
             if let Err(e) = server.start().await {
-                eprintln!("Server error: {}", e);
+                log::error!("Server error: {}", e);
             }
         });
 
@@ -448,7 +448,7 @@ mod tests {
         // Start server in background
         let server_handle = tokio::spawn(async move {
             if let Err(e) = server.start().await {
-                eprintln!("Server error: {}", e);
+                log::error!("Server error: {}", e);
             }
         });
 
@@ -534,7 +534,7 @@ mod tests {
         // Start server in background
         let server_handle = tokio::spawn(async move {
             if let Err(e) = server.start().await {
-                eprintln!("Server error: {}", e);
+                log::error!("Server error: {}", e);
             }
         });
 
@@ -613,7 +613,7 @@ mod tests {
         // Start server in background
         let server_handle = tokio::spawn(async move {
             if let Err(e) = server.start().await {
-                eprintln!("Server error: {}", e);
+                log::error!("Server error: {}", e);
             }
         });
 
