@@ -13,63 +13,44 @@ use tokio::sync::{
     Mutex, RwLock,
 };
 
-/// Trait for implementing MCP client handlers
-#[async_trait]
-pub trait ClientHandler: Send + Sync {
-    /// Start the handler and listen for messages
-    async fn start(self) -> Result<(), Error>;
-
-    /// Handle shutdown request
-    async fn shutdown(&self) -> Result<(), Error>;
-
-    /// Handle custom method calls
-    async fn handle_method(
-        &self,
-        method: String,
-        params: Option<serde_json::Value>,
-    ) -> Result<serde_json::Value, Error>;
-
-    /// Handle notifications
-    async fn handle_notification(
-        &self,
-        method: String,
-        params: Option<serde_json::Value>,
-    ) -> Result<(), Error>;
-}
-
 #[derive(Clone)]
-pub struct DefaultClientHandler {
+pub struct Session {
+    handler: Option<Arc<dyn ClientHandler>>,
     transport: Arc<dyn Transport>,
     receiver: Arc<Mutex<UnboundedReceiver<Message>>>,
     sender: Arc<UnboundedSender<Message>>,
 }
-impl DefaultClientHandler {
+impl Session {
+    /// Create a new session
     pub fn new(
         transport: Arc<dyn Transport>,
         sender: UnboundedSender<Message>,
         receiver: UnboundedReceiver<Message>,
+        handler: Option<Arc<dyn ClientHandler>>,
     ) -> Self {
         Self {
+            handler,
             transport,
             sender: Arc::new(sender),
             receiver: Arc::new(Mutex::new(receiver)),
         }
     }
-}
-#[async_trait]
-impl ClientHandler for DefaultClientHandler {
-    async fn start(self) -> Result<(), Error> {
-        let cl = self.clone();
+
+    /// Start the session and listen for messages
+    pub async fn start(self) -> Result<(), Error> {
+        let transport = self.transport.clone();
+        let handler = self.handler.unwrap_or(Arc::new(DefaultClientHandler));
         // listen for messages from the server
         tokio::spawn(async move {
-            let mut stream = cl.transport.receive();
+            let mut stream = transport.receive();
             while let Some(result) = stream.next().await {
                 match result {
                     Ok(message) => match &message {
                         Message::Request(r) => {
-                            let res = cl.handle_method(r.method.clone(), r.params.clone()).await;
-                            if cl
-                                .transport
+                            let res = handler
+                                .handle_method(r.method.clone(), r.params.clone())
+                                .await;
+                            if transport
                                 .send(Message::Response(Response::success(
                                     r.id.clone(),
                                     Some(res.unwrap()),
@@ -81,12 +62,12 @@ impl ClientHandler for DefaultClientHandler {
                             }
                         }
                         Message::Response(_) => {
-                            if cl.sender.send(message).is_err() {
+                            if self.sender.send(message).is_err() {
                                 break;
                             }
                         }
                         Message::Notification(n) => {
-                            if cl
+                            if handler
                                 .handle_notification(n.method.clone(), n.params.clone())
                                 .await
                                 .is_err()
@@ -110,7 +91,33 @@ impl ClientHandler for DefaultClientHandler {
         });
         Ok(())
     }
+}
 
+/// Trait for implementing MCP client handlers
+#[async_trait]
+pub trait ClientHandler: Send + Sync {
+    /// Handle shutdown request
+    async fn shutdown(&self) -> Result<(), Error>;
+
+    /// Handle custom method calls
+    async fn handle_method(
+        &self,
+        method: String,
+        params: Option<serde_json::Value>,
+    ) -> Result<serde_json::Value, Error>;
+
+    /// Handle notifications
+    async fn handle_notification(
+        &self,
+        method: String,
+        params: Option<serde_json::Value>,
+    ) -> Result<(), Error>;
+}
+
+#[derive(Clone, Default)]
+pub struct DefaultClientHandler;
+#[async_trait]
+impl ClientHandler for DefaultClientHandler {
     async fn handle_method(&self, method: String, _params: Option<Value>) -> Result<Value, Error> {
         match method.as_str() {
             // TODO: allow a commune client to impl this
