@@ -1,11 +1,11 @@
 //! # Model Context Protocol (MCP) Rust SDK
-//! 
+//!
 //! This SDK provides a Rust implementation of the Model Context Protocol (MCP), a protocol designed
 //! for communication between AI models and their runtime environments. The SDK supports both client
 //! and server implementations with multiple transport layers.
 //!
 //! ## Features
-//! 
+//!
 //! - Full implementation of MCP protocol specification
 //! - Multiple transport layers (WebSocket, stdio)
 //! - Async/await support using Tokio
@@ -18,17 +18,17 @@
 //! use std::sync::Arc;
 //! use mcp_rust_sdk::client::Client;
 //! use mcp_rust_sdk::transport::websocket::WebSocketTransport;
-//! 
+//!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     // Create a WebSocket transport
 //!     let transport = WebSocketTransport::new("ws://localhost:8080").await?;
-//!     
+//!
 //!     // Create the client with Arc-wrapped transport
 //!     let client = Client::new(Arc::new(transport));
-//!     
+//!
 //!     // Use the client...
-//!     
+//!
 //!     Ok(())
 //! }
 //! ```
@@ -48,43 +48,24 @@ pub mod types;
 
 // Re-export commonly used types for convenience
 pub use error::Error;
-pub use protocol::{Request, Response, Notification};
+pub use protocol::{Notification, Request, Response};
 pub use types::*;
 
 /// The latest supported protocol version of MCP
-/// 
+///
 /// This version represents the most recent protocol specification that this SDK supports.
 /// It is used during client-server handshake to ensure compatibility.
 pub const LATEST_PROTOCOL_VERSION: &str = "2024-11-05";
 
 /// List of all protocol versions supported by this SDK
-/// 
+///
 /// This list is used during version negotiation to determine compatibility between
 /// client and server. The versions are listed in order of preference, with the
 /// most recent version first.
-pub const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &[
-    LATEST_PROTOCOL_VERSION,
-    "2024-10-07",
-];
+pub const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &[LATEST_PROTOCOL_VERSION, "2024-10-07"];
 
 /// JSON-RPC version used by the MCP protocol
-/// 
+///
 /// MCP uses JSON-RPC 2.0 for its message format. This constant is used to ensure
 /// all messages conform to the correct specification.
 pub const JSONRPC_VERSION: &str = "2.0";
-
-// TODO: Remove this example function
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
