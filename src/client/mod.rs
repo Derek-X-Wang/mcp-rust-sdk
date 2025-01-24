@@ -48,7 +48,7 @@ impl Session {
                     Ok(message) => match &message {
                         Message::Request(r) => {
                             let res = handler
-                                .handle_method(r.method.clone(), r.params.clone())
+                                .handle_request(r.method.clone(), r.params.clone())
                                 .await;
                             if transport
                                 .send(Message::Response(Response::success(
@@ -99,8 +99,8 @@ pub trait ClientHandler: Send + Sync {
     /// Handle shutdown request
     async fn shutdown(&self) -> Result<(), Error>;
 
-    /// Handle custom method calls
-    async fn handle_method(
+    /// Handle requests
+    async fn handle_request(
         &self,
         method: String,
         params: Option<serde_json::Value>,
@@ -118,11 +118,10 @@ pub trait ClientHandler: Send + Sync {
 pub struct DefaultClientHandler;
 #[async_trait]
 impl ClientHandler for DefaultClientHandler {
-    async fn handle_method(&self, method: String, _params: Option<Value>) -> Result<Value, Error> {
+    async fn handle_request(&self, method: String, _params: Option<Value>) -> Result<Value, Error> {
         match method.as_str() {
-            // TODO: allow a commune client to impl this
             "sampling/createMessage" => {
-                println!("Got sampling/createMessage");
+                log::debug!("Got sampling/createMessage");
                 Ok(json!({}))
             }
             _ => Err(Error::Other("unknown method".to_string())),
@@ -140,7 +139,7 @@ impl ClientHandler for DefaultClientHandler {
                     let update_params: HashMap<String, Value> = serde_json::from_value(p)?;
                     if let Some(uri_val) = update_params.get("uri") {
                         let uri = uri_val.as_str().ok_or("some file").unwrap();
-                        println!("Resource {uri} was updated");
+                        log::debug!("Resource {uri} was updated");
                     }
                 }
                 Ok(())
@@ -151,7 +150,7 @@ impl ClientHandler for DefaultClientHandler {
     }
 
     async fn shutdown(&self) -> Result<(), Error> {
-        println!("Client shutting down");
+        log::debug!("Client shutting down");
         Ok(())
     }
 }
@@ -181,11 +180,11 @@ impl Client {
     pub async fn initialize(
         &self,
         implementation: Implementation,
-        capabilities: ClientCapabilities,
+        capabilities: Option<ClientCapabilities>,
     ) -> Result<ServerCapabilities, Error> {
         let params = serde_json::json!({
             "clientInfo": implementation,
-            "capabilities": capabilities,
+            "capabilities": capabilities.unwrap_or_default(),
             "protocolVersion": crate::LATEST_PROTOCOL_VERSION,
         });
         let response = self.request("initialize", Some(params)).await?;
