@@ -144,7 +144,10 @@ impl ClientHandler for DefaultClientHandler {
                 }
                 Ok(())
             }
-            "notifications/resources/list_changed" => Ok(()),
+            "notifications/resources/list_changed" => {
+                log::debug!("received resources/listChanged");
+                Ok(())
+            }
             _ => Err(Error::Other("unknown notification".to_string())),
         }
     }
@@ -187,6 +190,7 @@ impl Client {
             "capabilities": capabilities.unwrap_or_default(),
             "protocolVersion": crate::LATEST_PROTOCOL_VERSION,
         });
+        log::debug!("initializing client with capabilities: {}", params);
         let response = self.request("initialize", Some(params)).await?;
         let mut caps = ServerCapabilities::default();
         if let Some(resp_obj) = response.as_object() {
