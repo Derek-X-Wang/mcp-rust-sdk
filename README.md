@@ -1,3 +1,5 @@
+# ⚠️ ⚠️ ⚠️ Please use the offical [MCP Rust SDK](https://github.com/modelcontextprotocol/rust-sdk)
+
 # Model Context Protocol (MCP) Rust SDK
 
 > ⚠️ **Warning**: This SDK is currently a work in progress and is not ready for production use.
